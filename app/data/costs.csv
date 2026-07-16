@@ -1,0 +1,5 @@
+vehicle_model,standard_cost_per_unit,overtime_cost_per_hour,max_overtime_hours_allowed
+Brezza,450000,1500,20
+Swift,320000,1200,25
+Grand Vitara,650000,2000,15
+Baleno,380000,1400,22

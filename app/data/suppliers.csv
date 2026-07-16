@@ -1,0 +1,7 @@
+supplier_name,component_id,lead_time_days,delay_probability,quality_rating
+Nippon Electronics,C001,5,0.10,9.5
+Suzuki Powertrain India,C002,3,0.05,9.8
+TDS Lithium Battery,C003,12,0.30,9.1
+Maruti Metal Press,C004,2,0.02,9.9
+Renisaw Chips,C005,15,0.45,8.8
+Aisin Transmission,C006,8,0.15,9.6

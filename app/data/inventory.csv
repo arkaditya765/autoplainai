@@ -1,0 +1,7 @@
+component_id,component_name,stock_level,required_per_vehicle,target_model
+C001,SmartPlay Studio Infotainment,40,1,Swift
+C002,1.5L K-Series Engine,30,1,Brezza
+C003,Lithium-Ion Battery Pack,25,1,Grand Vitara
+C004,HEARTECT Chassis Frame,110,1,Swift
+C005,Semiconductor ICU Chip,15,2,Brezza
+C006,Automatic Transmission Unit,50,1,Baleno

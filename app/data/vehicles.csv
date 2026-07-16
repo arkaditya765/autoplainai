@@ -1,0 +1,5 @@
+vehicle_model,daily_demand,line_capacity_limit,assembly_rate_per_hour
+Brezza,100,120,15
+Swift,150,180,22
+Grand Vitara,80,90,12
+Baleno,120,130,18
