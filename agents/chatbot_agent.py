@@ -29,6 +29,33 @@ class ChatbotAgent(BaseAgent):
         super().__init__(client)
         self.registry = registry
 
+    def _execute_single_chatbot_tool(self, fc, query):
+        tool_name = fc.name
+        fc_args = fc.args or {}
+        
+        try:
+            tool_instance = self.registry.get_tool(tool_name)
+            tool_state = {
+                "query": query,
+                "context": {
+                    "search_query": fc_args.get("search_query"),
+                    "location": fc_args.get("location")
+                }
+            }
+            tool_result = tool_instance.execute(tool_state)
+            status = "success"
+        except Exception as e:
+            tool_result = {"status": "error", "message": str(e)}
+            status = "error"
+            
+        return {
+            "tool_name": tool_name,
+            "fc_id": fc.id,
+            "fc_args": fc_args,
+            "result": tool_result,
+            "status": status
+        }
+
     def _build_function_declarations(self, available_tools: List[Dict[str, Any]]) -> List[types.FunctionDeclaration]:
         """Converts tool metadata dicts into Gemini FunctionDeclaration objects."""
         declarations = []
@@ -155,26 +182,25 @@ class ChatbotAgent(BaseAgent):
 
                 # Execute requested function calls
                 function_response_parts = []
-                for part in function_calls:
-                    fc = part.function_call
-                    tool_name = fc.name
-                    logger.info("Chatbot LLM requested tool execution", tool_name=tool_name, args=fc.args)
-
-                    fc_args = fc.args or {}
+                
+                # Execute requested function calls in parallel using ThreadPoolExecutor
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor() as executor:
+                    futures = [
+                        executor.submit(self._execute_single_chatbot_tool, fc.function_call, query)
+                        for fc in function_calls
+                    ]
+                    # Wait for all executions to complete
+                    parallel_results = [f.result() for f in futures]
+                
+                # Sequentially process results to merge updates and record traces thread-safely
+                for res in parallel_results:
+                    tool_name = res["tool_name"]
+                    fc_id = res["fc_id"]
+                    fc_args = res["fc_args"]
+                    tool_result = res["result"]
                     
-                    # Execute tool
-                    tool_instance = self.registry.get_tool(tool_name)
-                    
-                    # Form tool execution state context
-                    tool_state = {
-                        "query": query,
-                        "context": {
-                            "search_query": fc_args.get("search_query"),
-                            "location": fc_args.get("location")
-                        }
-                    }
-                    tool_result = tool_instance.execute(tool_state)
-                    logger.info("Chatbot tool executed successfully", tool_name=tool_name, result=tool_result)
+                    logger.info("Chatbot tool executed successfully (parallel)", tool_name=tool_name, result=tool_result)
 
                     # Log to execution trace
                     updated_trace.append({
@@ -190,7 +216,7 @@ class ChatbotAgent(BaseAgent):
                     function_response_parts.append(
                         types.Part(
                             function_response=types.FunctionResponse(
-                                id=fc.id,
+                                id=fc_id,
                                 name=tool_name,
                                 response=tool_result
                             )
