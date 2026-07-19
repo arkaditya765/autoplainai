@@ -19,6 +19,22 @@ import datetime
 import json
 from typing import Any, Dict, List
 
+# Auto-reload backend modules to bypass Streamlit's process caching
+import importlib
+modules_to_reload = [
+    "agents.query_planner",
+    "agents.native_orchestrator_agent",
+    "agents.chatbot_agent",
+    "framework.workflow.graph",
+    "app.app"
+]
+for mod in modules_to_reload:
+    if mod in sys.modules:
+        try:
+            importlib.reload(sys.modules[mod])
+        except Exception:
+            pass
+
 # Directly import the application to run queries inline
 from app.app import AutoPlanApp
 # pyrefly: ignore [missing-import]
