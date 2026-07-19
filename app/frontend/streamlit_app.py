@@ -150,7 +150,9 @@ with st.sidebar:
         app.reset_memory()
         st.session_state.chat_history = []
         st.session_state.last_response_state = None
-        st.success("Memory cleared!")
+        if "app" in st.session_state:
+            del st.session_state["app"]
+        st.success("Memory cleared and agent code reloaded!")
         st.rerun()
 
     st.markdown("---")
@@ -162,6 +164,7 @@ with st.sidebar:
         help="Parallel runs multiple tools concurrently in worker threads. Sequential runs them one by one."
     )
     app.context_manager.session_variables["concurrency_mode"] = concurrency_choice.lower()
+    st.caption(f"Active Backend Mode: **{concurrency_choice}**")
 
     st.markdown("---")
     st.markdown("### Registered Tools")
