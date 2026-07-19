@@ -410,8 +410,11 @@ with col_trace:
                         tdur = te.get("duration_s", 0)
                         tstatus = te.get("status", "—")
                         ttask = te.get("task_id", "—")
+                        is_parallel = te.get("parallel", False)
+                        mode = "Parallel" if is_parallel else "Sequential"
+                        mode_color = "#00d2d3" if is_parallel else "#ff9f43"
                         status_color = "#05C46B" if tstatus == "success" else "#FF5E57"
-                        tool_table_rows += f"<tr><td>{tname}</td><td>{ttask}</td><td>{tdur:.3f}s</td><td><span style='color:{status_color}; font-weight:bold;'>{tstatus.upper()}</span></td></tr>"
+                        tool_table_rows += f"<tr><td>{tname}</td><td>{ttask}</td><td>{tdur:.3f}s</td><td><span style='color:{mode_color}; font-weight:bold;'>{mode}</span></td><td><span style='color:{status_color}; font-weight:bold;'>{tstatus.upper()}</span></td></tr>"
                     
                     st.markdown(f"""
                     <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
@@ -420,6 +423,7 @@ with col_trace:
                                 <th style="text-align: left; padding: 6px;">Tool</th>
                                 <th style="text-align: left; padding: 6px;">Task</th>
                                 <th style="text-align: left; padding: 6px;">Duration</th>
+                                <th style="text-align: left; padding: 6px;">Mode</th>
                                 <th style="text-align: left; padding: 6px;">Status</th>
                             </tr>
                         </thead>

@@ -33,6 +33,8 @@ class ChatbotAgent(BaseAgent):
         tool_name = fc.name
         fc_args = fc.args or {}
         
+        import time as _t
+        _t0 = _t.perf_counter()
         try:
             tool_instance = self.registry.get_tool(tool_name)
             tool_state = {
@@ -44,16 +46,19 @@ class ChatbotAgent(BaseAgent):
             }
             tool_result = tool_instance.execute(tool_state)
             status = "success"
+            dur = _t.perf_counter() - _t0
         except Exception as e:
             tool_result = {"status": "error", "message": str(e)}
             status = "error"
+            dur = 0.0
             
         return {
             "tool_name": tool_name,
             "fc_id": fc.id,
             "fc_args": fc_args,
             "result": tool_result,
-            "status": status
+            "status": status,
+            "duration_s": round(dur, 3)
         }
 
     def _build_function_declarations(self, available_tools: List[Dict[str, Any]]) -> List[types.FunctionDeclaration]:
@@ -102,6 +107,7 @@ class ChatbotAgent(BaseAgent):
             A state update dict containing the final response under 'recommendation'.
         """
         query = state.get("query", "")
+        diagnostics = dict(state.get("diagnostics", {}))
         logger.info("Chatbot agent starting response generation", query=query)
 
         system_instruction = load_prompt("chatbot.md", _CHATBOT_SYSTEM_INSTRUCTION_FALLBACK)
@@ -199,6 +205,8 @@ class ChatbotAgent(BaseAgent):
                     fc_id = res["fc_id"]
                     fc_args = res["fc_args"]
                     tool_result = res["result"]
+                    status = res["status"]
+                    dur = res["duration_s"]
                     
                     logger.info("Chatbot tool executed successfully (parallel)", tool_name=tool_name, result=tool_result)
 
@@ -212,6 +220,11 @@ class ChatbotAgent(BaseAgent):
                             "tool_output": tool_result
                         }
                     })
+                    
+                    # Record tool timing in diagnostics
+                    tool_execs = list(diagnostics.get("tool_executions", []))
+                    tool_execs.append({"tool": tool_name, "duration_s": dur, "status": status, "task_id": "chatbot", "parallel": True})
+                    diagnostics["tool_executions"] = tool_execs
 
                     function_response_parts.append(
                         types.Part(
@@ -238,7 +251,8 @@ class ChatbotAgent(BaseAgent):
 
             return {
                 "recommendation": final_response,
-                "execution_trace": updated_trace
+                "execution_trace": updated_trace,
+                "diagnostics": diagnostics
             }
 
         except Exception as e:
@@ -253,5 +267,6 @@ class ChatbotAgent(BaseAgent):
             })
             return {
                 "recommendation": "I'm sorry, I encountered an error processing your query. How can I help you today?",
-                "execution_trace": updated_trace
+                "execution_trace": updated_trace,
+                "diagnostics": diagnostics
             }

@@ -419,7 +419,7 @@ class NativeOrchestratorAgent(BaseAgent):
                         
                         # Record tool timing in diagnostics
                         tool_execs = list(diagnostics.get("tool_executions", []))
-                        tool_execs.append({"tool": tool_name, "duration_s": dur, "status": status, "task_id": task.id})
+                        tool_execs.append({"tool": tool_name, "duration_s": dur, "status": status, "task_id": task.id, "parallel": True})
                         diagnostics["tool_executions"] = tool_execs
                         
                         # Log to trace
