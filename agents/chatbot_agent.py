@@ -191,33 +191,20 @@ class ChatbotAgent(BaseAgent):
                 logger.info("Concurrency mode selected in chatbot", mode=concurrency_mode)
 
                 if concurrency_mode == "sequential":
-                    # Sequential execution (original behavior)
+                    # Sequential execution (unified state-preserving behavior)
                     for part in function_calls:
                         fc = part.function_call
                         tool_name = fc.name
                         logger.info("Chatbot LLM requested tool execution (sequential)", tool_name=tool_name, args=fc.args)
 
-                        fc_args = fc.args or {}
+                        # Execute chatbot tool synchronously using state-isolation wrapper
+                        res = self._execute_single_chatbot_tool(fc, query)
                         
-                        # Execute tool
-                        import time as _t
-                        _t0 = _t.perf_counter()
-                        try:
-                            tool_instance = self.registry.get_tool(tool_name)
-                            tool_state = {
-                                "query": query,
-                                "context": {
-                                    "search_query": fc_args.get("search_query"),
-                                    "location": fc_args.get("location")
-                                }
-                            }
-                            tool_result = tool_instance.execute(tool_state)
-                            status = "success"
-                            dur = _t.perf_counter() - _t0
-                        except Exception as e:
-                            tool_result = {"status": "error", "message": str(e)}
-                            status = "error"
-                            dur = 0.0
+                        tool_result = res["result"]
+                        status = res["status"]
+                        dur = res["duration_s"]
+                        fc_args = res["fc_args"]
+                        fc_id = res["fc_id"]
 
                         logger.info("Chatbot tool executed successfully (sequential)", tool_name=tool_name, result=tool_result)
 
@@ -234,13 +221,13 @@ class ChatbotAgent(BaseAgent):
                         
                         # Record tool timing in diagnostics (parallel=False)
                         tool_execs = list(diagnostics.get("tool_executions", []))
-                        tool_execs.append({"tool": tool_name, "duration_s": round(dur, 3), "status": status, "task_id": "chatbot", "parallel": False})
+                        tool_execs.append({"tool": tool_name, "duration_s": dur, "status": status, "task_id": "chatbot", "parallel": False})
                         diagnostics["tool_executions"] = tool_execs
 
                         function_response_parts.append(
                             types.Part(
                                 function_response=types.FunctionResponse(
-                                    id=fc.id,
+                                    id=fc_id,
                                     name=tool_name,
                                     response=tool_result
                                 )

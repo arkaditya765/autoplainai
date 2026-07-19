@@ -383,72 +383,42 @@ class NativeOrchestratorAgent(BaseAgent):
                     logger.info("Concurrency mode selected in orchestrator", mode=concurrency_mode, task_id=task.id)
 
                     if concurrency_mode == "sequential":
-                        # Sequential execution (original behavior)
+                        # Sequential execution (unified state-preserving behavior)
                         for part in function_call_parts:
                             fc = part.function_call
                             tool_name = fc.name
-                            selected_tools.append(tool_name)
                             logger.info("LLM requested tool execution in task context (sequential)", task_id=task.id, tool_name=tool_name, args=fc.args)
 
-                            fc_args = fc.args or {}
-                            # Extract and update context variables
-                            if "vehicle" in fc_args:
-                                v_name = fc_args["vehicle"]
-                                v_pct = fc_args.get("demand_change_pct") or fc_args.get("demand_increase_pct")
-                                
-                                adjustments = list(context.get("adjustments", []))
-                                adj_map = {}
-                                for adj in adjustments:
-                                    name = adj["vehicle"] if isinstance(adj, dict) else adj.get("vehicle")
-                                    pct = adj["demand_change_pct"] if isinstance(adj, dict) else adj.get("demand_change_pct")
-                                    if name:
-                                        adj_map[name.lower()] = {"vehicle": name, "demand_change_pct": pct}
-                                
-                                if v_pct is not None:
-                                    adj_map[v_name.lower()] = {"vehicle": v_name, "demand_change_pct": float(v_pct)}
-                                    context["demand_increase_pct"] = float(v_pct)
-                                elif v_name.lower() not in adj_map:
-                                    adj_map[v_name.lower()] = {"vehicle": v_name, "demand_change_pct": 0.0}
-                                    context["demand_increase_pct"] = 0.0
-                                    
-                                context["adjustments"] = list(adj_map.values())
-                                context["vehicle"] = v_name
+                            # Run tool synchronously using state-isolation wrapper
+                            res = self._execute_single_tool(fc, state, task.id)
                             
-                            if "overtime_hours" in fc_args:
-                                context["overtime_hours"] = fc_args["overtime_hours"]
-                            if "component" in fc_args:
-                                context["component"] = fc_args["component"]
-                            if "search_query" in fc_args:
-                                context["search_query"] = fc_args["search_query"]
-                            if "skill_name" in fc_args:
-                                context["skill_name"] = fc_args["skill_name"]
-
-                            # Expose current task environment updates
+                            tool_res = res["result"]
+                            status = res["status"]
+                            dur = res["duration_s"]
+                            tool_ctx = res["tool_context"]
+                            fc_args = res["fc_args"]
+                            fc_id = res["fc_id"]
+                            
+                            selected_tools.append(tool_name)
+                            task_tool_outputs[tool_name] = tool_res
+                            tool_outputs[tool_name] = tool_res
+                            
+                            # Merge context updates back sequentially
+                            for key, val in tool_ctx.items():
+                                if key == "adjustments":
+                                    adj_map = {a["vehicle"].lower(): a for a in context.get("adjustments", [])}
+                                    for a in val:
+                                        adj_map[a["vehicle"].lower()] = a
+                                    context["adjustments"] = list(adj_map.values())
+                                else:
+                                    context[key] = val
+                            
                             state["context"] = context
-
-                            try:
-                                tool = self.registry.get_tool(tool_name)
-                                import time as _t
-                                _tool_t0 = _t.perf_counter()
-                                result = tool.execute(state)
-                                _tool_dur = _t.perf_counter() - _tool_t0
-                                task_tool_outputs[tool_name] = result
-                                tool_outputs[tool_name] = result
-                                status = "success"
-                                logger.info("Tool executed successfully inside task (sequential)", task_id=task.id, tool_name=tool_name)
-                                # Record tool timing in diagnostics (parallel=False)
-                                tool_execs = list(diagnostics.get("tool_executions", []))
-                                tool_execs.append({"tool": tool_name, "duration_s": round(_tool_dur, 3), "status": status, "task_id": task.id, "parallel": False})
-                                diagnostics["tool_executions"] = tool_execs
-                            except Exception as e:
-                                result = {"status": "error", "message": str(e)}
-                                task_tool_outputs[tool_name] = result
-                                tool_outputs[tool_name] = result
-                                status = "error"
-                                logger.error("Tool execution failed inside task (sequential)", task_id=task.id, tool_name=tool_name, error=str(e))
-                                tool_execs = list(diagnostics.get("tool_executions", []))
-                                tool_execs.append({"tool": tool_name, "duration_s": 0, "status": status, "task_id": task.id, "parallel": False})
-                                diagnostics["tool_executions"] = tool_execs
+                            
+                            # Record tool timing in diagnostics (parallel=False)
+                            tool_execs = list(diagnostics.get("tool_executions", []))
+                            tool_execs.append({"tool": tool_name, "duration_s": dur, "status": status, "task_id": task.id, "parallel": False})
+                            diagnostics["tool_executions"] = tool_execs
 
                             # Log to trace
                             trace_entry = {
@@ -459,7 +429,7 @@ class NativeOrchestratorAgent(BaseAgent):
                                     "task_id": task.id,
                                     "tool_name": tool_name,
                                     "status": status,
-                                    **result
+                                    **tool_res
                                 },
                             }
                             if reasoning:
@@ -469,9 +439,9 @@ class NativeOrchestratorAgent(BaseAgent):
                             function_response_parts.append(
                                 types.Part(
                                     function_response=types.FunctionResponse(
-                                        id=fc.id,
+                                        id=fc_id,
                                         name=tool_name,
-                                        response=result,
+                                        response=tool_res,
                                     )
                                 )
                             )
