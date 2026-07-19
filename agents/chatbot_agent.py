@@ -188,6 +188,7 @@ class ChatbotAgent(BaseAgent):
 
                 function_response_parts = []
                 concurrency_mode = state.get("context", {}).get("concurrency_mode", "parallel")
+                logger.info("Concurrency mode selected in chatbot", mode=concurrency_mode)
 
                 if concurrency_mode == "sequential":
                     # Sequential execution (original behavior)

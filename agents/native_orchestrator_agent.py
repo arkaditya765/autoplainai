@@ -380,6 +380,7 @@ class NativeOrchestratorAgent(BaseAgent):
 
                     function_response_parts = []
                     concurrency_mode = context.get("concurrency_mode", "parallel")
+                    logger.info("Concurrency mode selected in orchestrator", mode=concurrency_mode, task_id=task.id)
 
                     if concurrency_mode == "sequential":
                         # Sequential execution (original behavior)
