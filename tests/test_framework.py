@@ -62,8 +62,8 @@ def test_registry_missing_tool():
 # =====================================================================
 # Executor Tests
 # =====================================================================
-def test_executor_sequential_execution():
-    """Verifies that the ToolExecutor sequentially executes selected tools and logs trace steps."""
+def test_executor_parallel_execution():
+    """Verifies that the ToolExecutor executes selected tools in parallel and logs trace steps."""
     registry = ToolRegistry()
     registry.register(DummyTool)
     executor = ToolExecutor(registry)

@@ -172,16 +172,7 @@ with st.sidebar:
         st.success("Memory cleared and agent code reloaded!")
         st.rerun()
 
-    st.markdown("---")
-    st.markdown("### Concurrency Configuration")
-    concurrency_choice = st.radio(
-        "Tool Execution Mode",
-        options=["Parallel", "Sequential"],
-        index=0,
-        help="Parallel runs multiple tools concurrently in worker threads. Sequential runs them one by one."
-    )
-    app.context_manager.session_variables["concurrency_mode"] = concurrency_choice.lower()
-    st.caption(f"Active Backend Mode: **{concurrency_choice}**")
+    app.context_manager.session_variables["concurrency_mode"] = "parallel"
 
     st.markdown("---")
     st.markdown("### Registered Tools")

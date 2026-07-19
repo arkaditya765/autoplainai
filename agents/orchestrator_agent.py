@@ -149,23 +149,29 @@ class OrchestratorAgent(BaseAgent):
         # Update context on state before execution
         state["context"] = context
 
-        # Step 4: Sequentially execute the selected tools
+        # Step 4: Execute the selected tools in parallel
         tool_outputs = dict(state.get("tool_outputs", {}))
         execution_trace = list(state.get("execution_trace", []))
 
-        for tool_name in decision.selected_tools:
+        def _exec_tool(tool_name: str):
             logger.info("Executing selected tool", tool_name=tool_name)
             try:
                 tool = self.registry.get_tool(tool_name)
                 result = tool.execute(state)
-                tool_outputs[tool_name] = result
                 status = "success"
                 logger.info("Tool executed successfully", tool_name=tool_name)
             except Exception as e:
                 result = {"status": "error", "message": str(e)}
-                tool_outputs[tool_name] = result
                 status = "error"
                 logger.error("Tool execution failed", tool_name=tool_name, error=str(e))
+            return tool_name, result, status
+
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor() as executor:
+            parallel_results = list(executor.map(_exec_tool, decision.selected_tools))
+
+        for tool_name, result, status in parallel_results:
+            tool_outputs[tool_name] = result
 
             # Add trace entry with the reasoning and tool result
             trace_entry = {

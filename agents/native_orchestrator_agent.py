@@ -379,140 +379,75 @@ class NativeOrchestratorAgent(BaseAgent):
                         break
 
                     function_response_parts = []
-                    concurrency_mode = context.get("concurrency_mode", "parallel")
-                    logger.info("Concurrency mode selected in orchestrator", mode=concurrency_mode, task_id=task.id)
+                    logger.info("Executing tools in parallel mode", task_id=task.id)
 
-                    if concurrency_mode == "sequential":
-                        # Sequential execution (unified state-preserving behavior)
-                        for part in function_call_parts:
-                            fc = part.function_call
-                            tool_name = fc.name
-                            logger.info("LLM requested tool execution in task context (sequential)", task_id=task.id, tool_name=tool_name, args=fc.args)
-
-                            # Run tool synchronously using state-isolation wrapper
-                            res = self._execute_single_tool(fc, state, task.id)
-                            
-                            tool_res = res["result"]
-                            status = res["status"]
-                            dur = res["duration_s"]
-                            tool_ctx = res["tool_context"]
-                            fc_args = res["fc_args"]
-                            fc_id = res["fc_id"]
-                            
-                            selected_tools.append(tool_name)
-                            task_tool_outputs[tool_name] = tool_res
-                            tool_outputs[tool_name] = tool_res
-                            
-                            # Merge context updates back sequentially
-                            for key, val in tool_ctx.items():
-                                if key == "adjustments":
-                                    adj_map = {a["vehicle"].lower(): a for a in context.get("adjustments", [])}
-                                    for a in val:
-                                        adj_map[a["vehicle"].lower()] = a
-                                    context["adjustments"] = list(adj_map.values())
-                                else:
-                                    context[key] = val
-                            
-                            state["context"] = context
-                            
-                            # Record tool timing in diagnostics (parallel=False)
-                            tool_execs = list(diagnostics.get("tool_executions", []))
-                            tool_execs.append({"tool": tool_name, "duration_s": dur, "status": status, "task_id": task.id, "parallel": False})
-                            diagnostics["tool_executions"] = tool_execs
-
-                            # Log to trace
-                            trace_entry = {
-                                "node": "orchestrator",
-                                "action": f"Task {task.id} Executed tool: {tool_name}",
-                                "timestamp": datetime.now(timezone.utc).isoformat(),
-                                "metadata": {
-                                    "task_id": task.id,
-                                    "tool_name": tool_name,
-                                    "status": status,
-                                    **tool_res
-                                },
-                            }
-                            if reasoning:
-                                trace_entry["metadata"]["reasoning"] = reasoning
-                            execution_trace.append(trace_entry)
-
-                            function_response_parts.append(
-                                types.Part(
-                                    function_response=types.FunctionResponse(
-                                        id=fc_id,
-                                        name=tool_name,
-                                        response=tool_res,
-                                    )
-                                )
-                            )
-                    else:
-                        # Parallel execution (new behavior)
-                        from concurrent.futures import ThreadPoolExecutor
-                        with ThreadPoolExecutor() as executor:
-                            futures = [
-                                executor.submit(self._execute_single_tool, fc.function_call, state, task.id)
-                                for fc in function_call_parts
-                            ]
-                            # Wait for all executions to complete
-                            parallel_results = [f.result() for f in futures]
+                    # Parallel execution
+                    from concurrent.futures import ThreadPoolExecutor
+                    with ThreadPoolExecutor() as executor:
+                        futures = [
+                            executor.submit(self._execute_single_tool, fc.function_call, state, task.id)
+                            for fc in function_call_parts
+                        ]
+                        # Wait for all executions to complete
+                        parallel_results = [f.result() for f in futures]
+                    
+                    # Sequentially process results to merge updates and record traces thread-safely
+                    for res in parallel_results:
+                        tool_name = res["tool_name"]
+                        fc_id = res["fc_id"]
+                        fc_args = res["fc_args"]
+                        tool_res = res["result"]
+                        status = res["status"]
+                        dur = res["duration_s"]
+                        tool_ctx = res["tool_context"]
                         
-                        # Sequentially process results to merge updates and record traces thread-safely
-                        for res in parallel_results:
-                            tool_name = res["tool_name"]
-                            fc_id = res["fc_id"]
-                            fc_args = res["fc_args"]
-                            tool_res = res["result"]
-                            status = res["status"]
-                            dur = res["duration_s"]
-                            tool_ctx = res["tool_context"]
-                            
-                            selected_tools.append(tool_name)
-                            task_tool_outputs[tool_name] = tool_res
-                            tool_outputs[tool_name] = tool_res
-                            
-                            # Merge context updates back sequentially
-                            for key, val in tool_ctx.items():
-                                if key == "adjustments":
-                                    # Thread-safe merge of adjustments
-                                    adj_map = {a["vehicle"].lower(): a for a in context.get("adjustments", [])}
-                                    for a in val:
-                                        adj_map[a["vehicle"].lower()] = a
-                                    context["adjustments"] = list(adj_map.values())
-                                else:
-                                    context[key] = val
-                            
-                            state["context"] = context
-                            
-                            # Record tool timing in diagnostics
-                            tool_execs = list(diagnostics.get("tool_executions", []))
-                            tool_execs.append({"tool": tool_name, "duration_s": dur, "status": status, "task_id": task.id, "parallel": True})
-                            diagnostics["tool_executions"] = tool_execs
-                            
-                            # Log to trace
-                            trace_entry = {
-                                "node": "orchestrator",
-                                "action": f"Task {task.id} Executed tool: {tool_name}",
-                                "timestamp": datetime.now(timezone.utc).isoformat(),
-                                "metadata": {
-                                    "task_id": task.id,
-                                    "tool_name": tool_name,
-                                    "status": status,
-                                    **tool_res
-                                },
-                            }
-                            if reasoning:
-                                trace_entry["metadata"]["reasoning"] = reasoning
-                            execution_trace.append(trace_entry)
+                        selected_tools.append(tool_name)
+                        task_tool_outputs[tool_name] = tool_res
+                        tool_outputs[tool_name] = tool_res
+                        
+                        # Merge context updates back sequentially
+                        for key, val in tool_ctx.items():
+                            if key == "adjustments":
+                                # Thread-safe merge of adjustments
+                                adj_map = {a["vehicle"].lower(): a for a in context.get("adjustments", [])}
+                                for a in val:
+                                    adj_map[a["vehicle"].lower()] = a
+                                context["adjustments"] = list(adj_map.values())
+                            else:
+                                context[key] = val
+                        
+                        state["context"] = context
+                        
+                        # Record tool timing in diagnostics
+                        tool_execs = list(diagnostics.get("tool_executions", []))
+                        tool_execs.append({"tool": tool_name, "duration_s": dur, "status": status, "task_id": task.id, "parallel": True})
+                        diagnostics["tool_executions"] = tool_execs
+                        
+                        # Log to trace
+                        trace_entry = {
+                            "node": "orchestrator",
+                            "action": f"Task {task.id} Executed tool: {tool_name}",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "metadata": {
+                                "task_id": task.id,
+                                "tool_name": tool_name,
+                                "status": status,
+                                **tool_res
+                            },
+                        }
+                        if reasoning:
+                            trace_entry["metadata"]["reasoning"] = reasoning
+                        execution_trace.append(trace_entry)
 
-                            function_response_parts.append(
-                                types.Part(
-                                    function_response=types.FunctionResponse(
-                                        id=fc_id,
-                                        name=tool_name,
-                                        response=tool_res,
-                                    )
+                        function_response_parts.append(
+                            types.Part(
+                                function_response=types.FunctionResponse(
+                                    id=fc_id,
+                                    name=tool_name,
+                                    response=tool_res,
                                 )
                             )
+                        )
 
                     contents.append(response_content)
                     contents.append(

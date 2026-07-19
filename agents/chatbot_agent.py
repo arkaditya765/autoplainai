@@ -187,100 +187,55 @@ class ChatbotAgent(BaseAgent):
                     break
 
                 function_response_parts = []
-                concurrency_mode = state.get("context", {}).get("concurrency_mode", "parallel")
-                logger.info("Concurrency mode selected in chatbot", mode=concurrency_mode)
+                logger.info("Executing chatbot tools in parallel mode")
 
-                if concurrency_mode == "sequential":
-                    # Sequential execution (unified state-preserving behavior)
-                    for part in function_calls:
-                        fc = part.function_call
-                        tool_name = fc.name
-                        logger.info("Chatbot LLM requested tool execution (sequential)", tool_name=tool_name, args=fc.args)
-
-                        # Execute chatbot tool synchronously using state-isolation wrapper
-                        res = self._execute_single_chatbot_tool(fc, query)
-                        
-                        tool_result = res["result"]
-                        status = res["status"]
-                        dur = res["duration_s"]
-                        fc_args = res["fc_args"]
-                        fc_id = res["fc_id"]
-
-                        logger.info("Chatbot tool executed successfully (sequential)", tool_name=tool_name, result=tool_result)
-
-                        # Log to execution trace
-                        updated_trace.append({
-                            "node": "chatbot",
-                            "action": f"Called tool '{tool_name}' with args {fc_args}.",
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                            "metadata": {
-                                "reasoning": f"Retrieved external information to answer query.",
-                                "tool_output": tool_result
-                            }
-                        })
-                        
-                        # Record tool timing in diagnostics (parallel=False)
-                        tool_execs = list(diagnostics.get("tool_executions", []))
-                        tool_execs.append({"tool": tool_name, "duration_s": dur, "status": status, "task_id": "chatbot", "parallel": False})
-                        diagnostics["tool_executions"] = tool_execs
-
-                        function_response_parts.append(
-                            types.Part(
-                                function_response=types.FunctionResponse(
-                                    id=fc_id,
-                                    name=tool_name,
-                                    response=tool_result
-                                )
-                            )
-                        )
-                else:
-                    # Parallel execution (new behavior)
-                    # Execute requested function calls in parallel using ThreadPoolExecutor
-                    from concurrent.futures import ThreadPoolExecutor
-                    with ThreadPoolExecutor() as executor:
-                        futures = [
-                            executor.submit(self._execute_single_chatbot_tool, fc.function_call, query)
-                            for fc in function_calls
-                        ]
-                        # Wait for all executions to complete
-                        parallel_results = [f.result() for f in futures]
+                # Parallel execution
+                # Execute requested function calls in parallel using ThreadPoolExecutor
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor() as executor:
+                    futures = [
+                        executor.submit(self._execute_single_chatbot_tool, fc.function_call, query)
+                        for fc in function_calls
+                    ]
+                    # Wait for all executions to complete
+                    parallel_results = [f.result() for f in futures]
+                
+                # Sequentially process results to merge updates and record traces thread-safely
+                for res in parallel_results:
+                    tool_name = res["tool_name"]
+                    fc_id = res["fc_id"]
+                    fc_args = res["fc_args"]
+                    tool_result = res["result"]
+                    status = res["status"]
+                    dur = res["duration_s"]
                     
-                    # Sequentially process results to merge updates and record traces thread-safely
-                    for res in parallel_results:
-                        tool_name = res["tool_name"]
-                        fc_id = res["fc_id"]
-                        fc_args = res["fc_args"]
-                        tool_result = res["result"]
-                        status = res["status"]
-                        dur = res["duration_s"]
-                        
-                        logger.info("Chatbot tool executed successfully (parallel)", tool_name=tool_name, result=tool_result)
+                    logger.info("Chatbot tool executed successfully (parallel)", tool_name=tool_name, result=tool_result)
 
-                        # Log to execution trace
-                        updated_trace.append({
-                            "node": "chatbot",
-                            "action": f"Called tool '{tool_name}' with args {fc_args}.",
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                            "metadata": {
-                                "reasoning": f"Retrieved external information to answer query.",
-                                "tool_output": tool_result
-                            }
-                        })
-                        
-                        # Record tool timing in diagnostics (parallel=True)
-                        tool_execs = list(diagnostics.get("tool_executions", []))
-                        tool_execs.append({"tool": tool_name, "duration_s": dur, "status": status, "task_id": "chatbot", "parallel": True})
-                        diagnostics["tool_executions"] = tool_execs
+                    # Log to execution trace
+                    updated_trace.append({
+                        "node": "chatbot",
+                        "action": f"Called tool '{tool_name}' with args {fc_args}.",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "metadata": {
+                            "reasoning": f"Retrieved external information to answer query.",
+                            "tool_output": tool_result
+                        }
+                    })
+                    
+                    # Record tool timing in diagnostics (parallel=True)
+                    tool_execs = list(diagnostics.get("tool_executions", []))
+                    tool_execs.append({"tool": tool_name, "duration_s": dur, "status": status, "task_id": "chatbot", "parallel": True})
+                    diagnostics["tool_executions"] = tool_execs
 
-                        function_response_parts.append(
-                            types.Part(
-                                function_response=types.FunctionResponse(
-                                    id=fc_id,
-                                    name=tool_name,
-                                    response=tool_result
-                                )
+                    function_response_parts.append(
+                        types.Part(
+                            function_response=types.FunctionResponse(
+                                id=fc_id,
+                                name=tool_name,
+                                response=tool_result
                             )
                         )
+                    )
 
                 # Add the tool responses back to the conversation
                 contents.append(types.Content(role="user", parts=function_response_parts))

@@ -60,9 +60,8 @@ class QueryPlannerAgent(BaseAgent):
 
         logger.info("Query Planner Agent running task decomposition", query=query)
 
-        # Format context variables for the planner prompt (excluding concurrency_mode to align sequential/parallel tasks)
-        planner_context = {k: v for k, v in context_vars.items() if k != "concurrency_mode"}
-        context_str = "\n".join(f"  - {k}: {v}" for k, v in planner_context.items()) if planner_context else "No active context variables."
+        # Format context variables for the planner prompt
+        context_str = "\n".join(f"  - {k}: {v}" for k, v in context_vars.items()) if context_vars else "No active context variables."
 
         # Format history for resolving context
         history_str = ""
