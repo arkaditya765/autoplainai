@@ -154,6 +154,16 @@ with st.sidebar:
         st.rerun()
 
     st.markdown("---")
+    st.markdown("### Concurrency Configuration")
+    concurrency_choice = st.radio(
+        "Tool Execution Mode",
+        options=["Parallel", "Sequential"],
+        index=0,
+        help="Parallel runs multiple tools concurrently in worker threads. Sequential runs them one by one."
+    )
+    app.context_manager.session_variables["concurrency_mode"] = concurrency_choice.lower()
+
+    st.markdown("---")
     st.markdown("### Registered Tools")
     st.write("These tools were dynamically discovered from the application registry:")
     for tool_meta in app.registry.get_all_metadata():
