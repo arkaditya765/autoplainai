@@ -22,6 +22,7 @@ from typing import Any, Dict, List
 # Auto-reload backend modules to bypass Streamlit's process caching
 import importlib
 modules_to_reload = [
+    "app.config",
     "agents.query_planner",
     "agents.native_orchestrator_agent",
     "agents.chatbot_agent",
