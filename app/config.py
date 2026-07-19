@@ -33,7 +33,7 @@ COSTS_CSV = DATA_DIR / "costs.csv"
 
 # Gemini config
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash-8b")
 
 # Server ports
 API_HOST = os.getenv("API_HOST", "127.0.0.1")

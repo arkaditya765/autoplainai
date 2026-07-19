@@ -24,7 +24,7 @@ class GeminiClient:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        default_model: str = "gemini-2.5-flash",
+        default_model: str = "gemini-1.5-flash-8b",
     ) -> None:
         """Initializes the Gemini client.
 
