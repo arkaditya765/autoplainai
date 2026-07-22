@@ -1168,30 +1168,60 @@ Each agent loads its system instruction from a dedicated markdown file. This des
 | C005 | Semiconductor ICU Chip | 15 | 2 | Brezza |
 | C006 | Automatic Transmission Unit | 50 | 1 | Baleno |
 
-#### File: `app/data/suppliers.csv`
+### File: `app/data/suppliers.csv`
 
 | supplier_name | component_id | lead_time_days | delay_probability | quality_rating |
-|:--------------|:-------------|:---------------|:-----------------|:---------------|
+|:--------------|:-------------|---------------:|------------------:|---------------:|
 | Nippon Electronics | C001 | 5 | 0.10 | 9.5 |
 | Suzuki Powertrain India | C002 | 3 | 0.05 | 9.8 |
 | TDS Lithium Battery | C003 | 12 | 0.30 | 9.1 |
 | Maruti Metal Press | C004 | 2 | 0.02 | 9.9 |
 | Renisaw Chips | C005 | 15 | 0.45 | 8.8 |
 | Aisin Transmission | C006 | 8 | 0.15 | 9.6 |
- 
-+#### File: `app/data/maruti_safety_policy.pdf`
-+
-+**Purpose:** 6-page comprehensive factory safety manual outlining standard operating safety procedures, compliance guidelines, and emergency protocols for Maruti Suzuki manufacturing facilities.
-+
-+**Sections Documented:**
-+1. **General Safety Policy:** Vision, Zero-accident targets, employee safety empowerment, visitor access requirements.
-+2. **Speed Limits:** Inside facility speed limit (20 km/h), forklift operations (10 km/h), pedestrian green corridors, AGV coordination.
-+3. **Personal Protective Equipment (PPE):** Requirements for steel-toe shoes, safety goggles, high-visibility jackets, hearing protection, cut-resistant gloves.
-+4. **Safety Audits:** Daily pre-shift inspections, digital logging requirements, monthly cross-department reviews.
-+5. **Emergency Protocols:** Siren patterns, evacuation routes, assembly points, supervisor roll-calls, first-aid stations.
-+6. **Machine & Tool Safety:** LOTO (Lockout/Tagout) locks, pressure seal verification, hazardous materials handling.
-+
- ---
+
+---
+
+### File: `app/data/maruti_safety_policy.pdf`
+
+**Purpose:**  
+A 6-page comprehensive factory safety manual outlining standard operating safety procedures, compliance guidelines, and emergency protocols for Maruti Suzuki manufacturing facilities.
+
+#### Sections
+
+##### 1. General Safety Policy
+- Vision and zero-accident targets
+- Employee safety empowerment
+- Visitor access requirements
+
+##### 2. Speed Limits
+- Maximum vehicle speed inside the facility: **20 km/h**
+- Forklift speed limit: **10 km/h**
+- Pedestrian green corridors
+- AGV (Automated Guided Vehicle) coordination guidelines
+
+##### 3. Personal Protective Equipment (PPE)
+- Steel-toe safety shoes
+- Safety goggles
+- High-visibility jackets
+- Hearing protection
+- Cut-resistant gloves
+
+##### 4. Safety Audits
+- Daily pre-shift inspections
+- Digital safety log requirements
+- Monthly cross-department safety reviews
+
+##### 5. Emergency Protocols
+- Emergency siren patterns
+- Evacuation routes
+- Assembly points
+- Supervisor roll calls
+- First-aid station locations
+
+##### 6. Machine & Tool Safety
+- Lockout/Tagout (LOTO) procedures
+- Pressure seal verification
+- Hazardous materials handling guidelines
  
  ### 5.10 Tests Layer — tests/
 
