@@ -116,15 +116,16 @@ maruti iteration 1/
 │   ├── __init__.py
 │   ├── config.py                       # Global configuration and paths
 │   ├── app.py                          # Main AutoPlanApp orchestrator class
-│   ├── data/                           # CSV datasets
+│   ├── data/                           # CSV and PDF datasets
 │   │   ├── vehicles.csv
 │   │   ├── costs.csv
 │   │   ├── inventory.csv
-│   │   └── suppliers.csv
+│   │   ├── suppliers.csv
+│   │   └── maruti_safety_policy.pdf    # Maruti Suzuki Safety Policy manual (PDF)
 │   ├── api/                            # REST API (FastAPI)
 │   └── frontend/                       # Streamlit web frontend
 │
-├── framework/                          # Core framework layer
+│── framework/                          # Core framework layer
 │   ├── llm/
 │   │   ├── gemini_client.py            # Gemini GenAI SDK wrapper
 │   │   └── prompts.py                  # Fallback prompt strings
@@ -158,6 +159,7 @@ maruti iteration 1/
 │   ├── cost_tool.py                    # Cost and overtime expense estimator
 │   ├── inventory_tool.py              # Parts stock shortage checker
 │   ├── supplier_tool.py               # Supplier risk and lead time querier
+│   ├── pdf_search_tool.py              # PDF RAG search tool for Safety Manual
 │   ├── search_tool.py                 # DuckDuckGo web search tool
 │   ├── weather_tool.py                # Weather forecast stub tool
 │   └── load_skill_tool.py             # Dynamic skill/persona loader
@@ -187,7 +189,9 @@ maruti iteration 1/
     ├── test_planner.py
     ├── test_router.py
     ├── test_skill_retriever.py
-    └── test_skills.py
+    ├── test_skills.py
+    └── test_pdf_search.py              # Unit tests for PDF RAG Tool
+
 ```
 
 ---
@@ -969,6 +973,26 @@ All tools inherit from `BaseTool` and implement the `execute(state)` method. The
 
 ---
 
+#### File: `tools/pdf_search_tool.py`
+
+| Attribute | Details |
+|:----------|:--------|
+| **Purpose** | Performs Retrieval-Augmented Generation (RAG) semantic search across the Maruti Suzuki Factory Safety Manual PDF |
+| **Data Source** | `app/data/*.pdf` (dynamically discovered PDF safety manual) |
+| **Embedding Model** | `gemini-embedding-2` (3072-dimensional vector output) |
+| **Ranking Algorithm** | Cosine similarity using NumPy vector mathematics |
+| **Caching System** | File MD5 checksum-based JSON vector caching for sub-10ms response times |
+| **Lines of Code** | ~176 |
+
+**How it works:**
+1. Computes the MD5 checksum of the target PDF file.
+2. Looks for a matching local cache file (e.g., `maruti_safety_policy_vector_cache.json`).
+3. If a cache hit occurs, loads the pre-computed text chunks and vectors instantly.
+4. If a cache miss occurs, extracts paragraph chunks from the PDF using `pypdf`, requests embeddings from Gemini, and stores them in the cache.
+5. Computes the cosine similarity score for all chunks against the query vector and returns the top 2 matched safety regulations.
+
+---
+
 #### File: `tools/search_tool.py`
 
 | Attribute | Details |
@@ -1154,10 +1178,23 @@ Each agent loads its system instruction from a dedicated markdown file. This des
 | Maruti Metal Press | C004 | 2 | 0.02 | 9.9 |
 | Renisaw Chips | C005 | 15 | 0.45 | 8.8 |
 | Aisin Transmission | C006 | 8 | 0.15 | 9.6 |
+ 
++#### File: `app/data/maruti_safety_policy.pdf`
++
++**Purpose:** 6-page comprehensive factory safety manual outlining standard operating safety procedures, compliance guidelines, and emergency protocols for Maruti Suzuki manufacturing facilities.
++
++**Sections Documented:**
++1. **General Safety Policy:** Vision, Zero-accident targets, employee safety empowerment, visitor access requirements.
++2. **Speed Limits:** Inside facility speed limit (20 km/h), forklift operations (10 km/h), pedestrian green corridors, AGV coordination.
++3. **Personal Protective Equipment (PPE):** Requirements for steel-toe shoes, safety goggles, high-visibility jackets, hearing protection, cut-resistant gloves.
++4. **Safety Audits:** Daily pre-shift inspections, digital logging requirements, monthly cross-department reviews.
++5. **Emergency Protocols:** Siren patterns, evacuation routes, assembly points, supervisor roll-calls, first-aid stations.
++6. **Machine & Tool Safety:** LOTO (Lockout/Tagout) locks, pressure seal verification, hazardous materials handling.
++
+ ---
+ 
+ ### 5.10 Tests Layer — tests/
 
----
-
-### 5.10 Tests Layer — tests/
 
 | Test File | What It Tests |
 |:----------|:--------------|
@@ -1167,8 +1204,11 @@ Each agent loads its system instruction from a dedicated markdown file. This des
 | `test_router.py` | Router agent classification accuracy (planning vs general) |
 | `test_skill_retriever.py` | Skill retriever embedding search and semantic matching |
 | `test_skills.py` | Skill loading, prompt file reading, and skill tool execution |
+| `test_pdf_search.py` | PDF parsing, cache loading, and semantic cosine similarity calculations |
+| `test_parallel_tasks.py` | Parallel execution of tasks and concurrent tool running within the ReAct loop |
+ 
+ ---
 
----
 
 ### 5.11 Configuration Files
 
@@ -1418,7 +1458,14 @@ To optimize query latency and prevent redundant network costs to the Google GenA
    - **Mechanism**: Maintains a runtime hash map (`cache_key -> embedding_vector`) on the client instance.
    - **Operation**: Prevents repetitive embedding requests for identical queries or texts during multi-agent turns of a single execution flow.
 
+3. **Persistent MD5-Checksum PDF Vector Cache (`*_vector_cache.json`)**:
+   - **Location**: `app/data/` (e.g. `maruti_safety_policy_vector_cache.json`).
+   - **Mechanism**: Caches text paragraphs and their 3072-dimensional vector embeddings generated by `gemini-embedding-2` for PDF safety manuals.
+   - **Operation**: On execution, the tool computes the MD5 checksum of the target PDF file. If a matching cache file exists with the same checksum, embeddings are loaded instantly from local disk. If the PDF's hash differs or the cache is missing, the tool reads page lines using `pypdf`, requests new embeddings from the Gemini API, and updates the cache.
+   - **Result**: Ensures subsequent PDF queries bypass expensive text extraction and API embedding generation completely, yielding sub-10ms startup times.
+
 ---
+
 
 ## 7. Design Patterns Used
 
@@ -1430,9 +1477,10 @@ To optimize query latency and prevent redundant network costs to the Google GenA
 | **Blackboard / Shared State** | `AgentState` | All agents read from and write to a shared state dictionary |
 | **Abstract Factory + Registry** | `BaseTool` + `ToolRegistry` | Dynamic tool registration and lookup |
 | **Reflection / Plugin Loader** | `registry_loader.py` | Auto-discovers tool classes at runtime |
-| **RAG (Retrieval-Augmented Generation)** | `ToolRetriever`, `SkillRetriever` | Embedding-based semantic search for tool/skill selection |
+| **RAG (Retrieval-Augmented Generation)** | `ToolRetriever`, `SkillRetriever`, `PDFSearchTool` | Embedding-based semantic search for tools, skills, and PDF safety manual querying |
 | **State Machine / Graph** | `graph.py` (LangGraph) | Deterministic workflow orchestration with conditional routing |
 | **Template Method** | `BaseAgent` | Defines the interface contract for all agents |
+
 | **Classifier / Gateway** | `RouterAgent` | Routes queries to appropriate processing pipelines |
 | **Task Decomposition** | `QueryPlannerAgent` | Breaks complex goals into atomic sub-tasks |
 | **ReAct (Reasoning + Action)** | `NativeOrchestratorAgent`, `ChatbotAgent` | Multi-turn tool calling loops with LLM reasoning |
