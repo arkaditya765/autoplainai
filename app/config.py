@@ -30,10 +30,13 @@ VEHICLES_CSV = DATA_DIR / "vehicles.csv"
 INVENTORY_CSV = DATA_DIR / "inventory.csv"
 SUPPLIERS_CSV = DATA_DIR / "suppliers.csv"
 COSTS_CSV = DATA_DIR / "costs.csv"
+# Dynamically discover the first PDF file in app/data/
+pdf_candidates = list(DATA_DIR.glob("*.pdf"))
+SAFETY_POLICY_PDF = pdf_candidates[0] if pdf_candidates else DATA_DIR / "maruti_safety_policy.pdf"
 
 # Gemini config
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 
 # Server ports
 API_HOST = os.getenv("API_HOST", "127.0.0.1")

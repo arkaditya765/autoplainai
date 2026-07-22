@@ -315,7 +315,7 @@ with col_trace:
         # Display Selected Tools
         selected_tools = state.get("selected_tools", [])
         if selected_tools:
-            st.markdown("#### 🔧 Tools Executed in Sequence:")
+            st.markdown("#### 🔧 Tools Executed:")
             st.code(", ".join(selected_tools))
             st.markdown("---")
 

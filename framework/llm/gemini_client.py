@@ -5,6 +5,7 @@ validation, handling structured JSON output, and handling API exceptions.
 """
 
 import os
+import threading
 from typing import Any, Dict, Optional, Type, Union
 from pydantic import BaseModel
 from google import genai
@@ -24,7 +25,7 @@ class GeminiClient:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        default_model: str = "gemini-1.5-flash",
+        default_model: str = "gemini-flash-lite-latest",
     ) -> None:
         """Initializes the Gemini client.
 
@@ -51,6 +52,9 @@ class GeminiClient:
 
         # Per-query call log for diagnostics (read by frontend, cleared per query)
         self._call_log = []
+
+        # Lock to ensure thread safety during concurrent agent node executions
+        self._lock = threading.Lock()
 
     def generate(
         self,
@@ -89,13 +93,14 @@ class GeminiClient:
                 config=config,
             )
             _dur = _t.perf_counter() - _t0
-            self._call_log.append({
-                "type": "llm",
-                "caller": "GeminiClient.generate",
-                "model": target_model,
-                "duration_s": round(_dur, 3),
-                "purpose": f"Text generation (temp={temperature})",
-            })
+            with self._lock:
+                self._call_log.append({
+                    "type": "llm",
+                    "caller": "GeminiClient.generate",
+                    "model": target_model,
+                    "duration_s": round(_dur, 3),
+                    "purpose": f"Text generation (temp={temperature})",
+                })
             if not response.text:
                 raise LLMResponseError("Gemini returned an empty response.")
             return response.text
@@ -155,13 +160,14 @@ class GeminiClient:
                 config=config,
             )
             _dur = _t.perf_counter() - _t0
-            self._call_log.append({
-                "type": "llm",
-                "caller": "GeminiClient.generate_structured",
-                "model": target_model,
-                "duration_s": round(_dur, 3),
-                "purpose": f"Structured output → {response_schema.__name__}",
-            })
+            with self._lock:
+                self._call_log.append({
+                    "type": "llm",
+                    "caller": "GeminiClient.generate_structured",
+                    "model": target_model,
+                    "duration_s": round(_dur, 3),
+                    "purpose": f"Structured output → {response_schema.__name__}",
+                })
 
             if not response.text:
                 raise LLMResponseError("Gemini returned an empty response during structured call.")
@@ -186,7 +192,7 @@ class GeminiClient:
                 details=err_msg
             ) from e
 
-    def embed(self, text: str, model: str = "text-embedding-004") -> list[float]:
+    def embed(self, text: str, model: str = "gemini-embedding-2") -> list[float]:
         """Generates an embedding vector using Gemini's embedding API.
 
         Args:
@@ -200,9 +206,10 @@ class GeminiClient:
             raise LLMError("Gemini client is not initialized. Please configure GEMINI_API_KEY.")
             
         cache_key = (text, model)
-        if cache_key in self._embedding_cache:
-            logger.debug("Loading embedding from in-memory cache", text_preview=text[:40])
-            return self._embedding_cache[cache_key]
+        with self._lock:
+            if cache_key in self._embedding_cache:
+                logger.debug("Loading embedding from in-memory cache", text_preview=text[:40])
+                return self._embedding_cache[cache_key]
             
         try:
             import time as _t
@@ -215,15 +222,16 @@ class GeminiClient:
             if not response.embeddings:
                 raise LLMResponseError("Gemini returned empty embeddings.")
             vector = response.embeddings[0].values
-            self._embedding_cache[cache_key] = vector
-            self._call_log.append({
-                "type": "embedding",
-                "caller": "GeminiClient.embed",
-                "model": model,
-                "duration_s": round(_dur, 3),
-                "purpose": f"Embed: \"{text[:50]}...\"",
-                "cached": False,
-            })
+            with self._lock:
+                self._embedding_cache[cache_key] = vector
+                self._call_log.append({
+                    "type": "embedding",
+                    "caller": "GeminiClient.embed",
+                    "model": model,
+                    "duration_s": round(_dur, 3),
+                    "purpose": f"Embed: \"{text[:50]}...\"",
+                    "cached": False,
+                })
             return vector
         except APIError as e:
             logger.error("Gemini API embedding error occurred", error=str(e))

@@ -1341,7 +1341,69 @@ flowchart TD
     style N fill:#2196F3,color:#fff
 ```
 
-### 6.5 Caching Mechanisms (Vector & In-Memory Embedding Cache)
+### 6.5 Parallel Task Scheduling Flow
+
+```mermaid
+flowchart TD
+    A["Begin Batch Planning Execution"] --> B["Identify Pending Tasks in Plan"]
+    B --> C["Check Prerequisite Dependencies for each Task"]
+    C --> D{"Are Prerequisites Satisfied?"}
+    
+    D -- "No: Preceding Task Failed" --> E["Propagate Cascade Failure"]
+    E --> F["Mark Task Status: failed"]
+    F --> G["Record Failure Result in state"]
+    
+    D -- "No: Preceding Task Pending" --> H["Skip for Current Batch (Wait)"]
+    
+    D -- "Yes (Ready)" --> I["Add Task to Current Ready Batch"]
+    
+    I --> J["Spawn batch execution via ThreadPoolExecutor"]
+    J --> K["Task 1 Thread: run_task_in_thread()"]
+    J --> L["Task 2 Thread: run_task_in_thread()"]
+    
+    K --> M["Block & Wait for Batch Completion"]
+    L --> M
+    
+    M --> N["Update pending list for next iteration"]
+    N --> O{"Are there remaining pending tasks?"}
+    O -- "Yes" --> B
+    O -- "No" --> P["Task Plan Execution Complete"]
+
+    style A fill:#4CAF50,color:#fff
+    style J fill:#FF9800,color:#fff
+    style E fill:#F44336,color:#fff
+    style P fill:#2196F3,color:#fff
+```
+
+### 6.6 Thread-Safe State Merging Flow
+
+```mermaid
+flowchart TD
+    A["Task Thread starts run_task_in_thread()"] --> B["Acquire state_lock (Mutex)"]
+    B --> C["Snapshot Shared Context & Results"]
+    C --> D["Release state_lock"]
+    
+    D --> E["Execute Task ReAct Loop (LLM + Tools)"]
+    E --> F["Log outcomes to local stack accumulator variables"]
+    
+    F --> G["Acquire state_lock (Mutex)"]
+    G --> H["Merge traces & selected tools to global lists"]
+    G --> I["Merge LLM & tool calls to global diagnostics"]
+    G --> J["Map & Merge vehicle adjustments to context"]
+    
+    H --> K["Release state_lock"]
+    I --> K
+    J --> K
+    
+    K --> L["Task Thread Execution Complete"]
+
+    style A fill:#E8F5E9
+    style B fill:#FF9800,color:#fff
+    style G fill:#FF9800,color:#fff
+    style L fill:#4CAF50,color:#fff
+```
+
+### 6.7 Caching Mechanisms (Vector & In-Memory Embedding Cache)
 
 To optimize query latency and prevent redundant network costs to the Google GenAI API endpoints, the framework utilizes a dual-layer caching strategy:
 

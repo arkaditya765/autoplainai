@@ -8,3 +8,7 @@ python-dotenv>=1.0.1
 # Testing & Mocking
 pytest>=8.0.0
 pytest-mock>=3.12.0
+
+# PDF RAG Extraction
+pypdf>=5.0.0
+reportlab>=4.0.0

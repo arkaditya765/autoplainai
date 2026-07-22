@@ -177,7 +177,7 @@ def test_tool_retriever(mocker):
     # Let "unrelated_tool" embed to: [0.0, 1.0]
     # Let Query matching dummy_tool embed to: [0.9, 0.1]
     # Let Query matching unrelated_tool embed to: [0.1, 0.9]
-    def mock_embed(text, model="text-embedding-004"):
+    def mock_embed(text, model="gemini-embedding-2"):
         if "dummy_tool" in text:
             return [1.0, 0.0]
         elif "unrelated_tool" in text:

@@ -83,6 +83,13 @@ class ChatbotAgent(BaseAgent):
                         "description": "The location/city to query the weather for.",
                     }
                 }
+            elif tool_name == "pdf_search_tool":
+                properties = {
+                    "search_query": {
+                        "type": "STRING",
+                        "description": "The safety policy query, regulations, PPE requirements, or speed limit question to look up in the manual.",
+                    }
+                }
             
             declarations.append(
                 types.FunctionDeclaration(
@@ -114,7 +121,7 @@ class ChatbotAgent(BaseAgent):
 
         # Retrieve available tools for general chatbot
         chatbot_tools = []
-        for tool_name in ["search_tool", "weather_tool"]:
+        for tool_name in ["search_tool", "weather_tool", "pdf_search_tool"]:
             try:
                 t = self.registry.get_tool(tool_name)
                 chatbot_tools.append(t.get_metadata())

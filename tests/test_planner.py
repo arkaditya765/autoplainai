@@ -168,14 +168,25 @@ def test_orchestrator_success_and_error_isolation(mocker):
     call_count = 0
     def mock_generate_content(*args, **kwargs):
         nonlocal call_count
+        contents = kwargs.get("contents") or (args[0] if len(args) > 0 else None)
+        prompt_text = ""
+        if contents:
+            if isinstance(contents, list) and len(contents) > 0:
+                parts = getattr(contents[0], "parts", None)
+                if parts and len(parts) > 0:
+                    prompt_text = str(getattr(parts[0], "text", "") or "")
+            else:
+                prompt_text = str(contents)
+
+        if "task_2" in prompt_text or "This will fail" in prompt_text:
+            # Task 2 raises exception to verify error isolation
+            raise ValueError("Simulated LLM Generation Error for Task 2.")
+            
         call_count += 1
         if call_count == 1:
             return mock_response_1
-        elif call_count == 2:
-            return mock_response_2
         else:
-            # Task 2 raises exception to verify error isolation
-            raise ValueError("Simulated LLM Generation Error for Task 2.")
+            return mock_response_2
 
     mock_client.client.models.generate_content.side_effect = mock_generate_content
 

@@ -5,6 +5,8 @@ verifying dependencies, and coordinating native Gemini tool calling for each tas
 """
 
 from datetime import datetime, timezone
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List
 
 from google.genai import types
@@ -164,6 +166,13 @@ class NativeOrchestratorAgent(BaseAgent):
                         "description": "The exact web search query to look up on DuckDuckGo (e.g. 'Brezza sales data 2026' or 'Maruti Suzuki latest component shortages')",
                     }
                 }
+            elif tool_name == "pdf_search_tool":
+                properties = {
+                    "search_query": {
+                        "type": "STRING",
+                        "description": "The safety policy query, regulations, PPE requirements, or speed limit question to look up in the manual.",
+                    }
+                }
             elif tool_name == "load_skill_tool":
                 properties = {
                     "skill_name": {
@@ -243,39 +252,20 @@ class NativeOrchestratorAgent(BaseAgent):
         context = dict(state.get("context", {}))
         diagnostics = dict(state.get("diagnostics", {}))
 
-        # Sort tasks by priority
-        sorted_tasks = sorted(plan.tasks, key=lambda t: t.priority)
+        state_lock = threading.Lock()
 
-        for task in sorted_tasks:
-            # Check dependencies
-            dependency_failed = False
-            for dep_id in task.depends_on:
-                if dep_id in failed_tasks:
-                    dependency_failed = True
-                    break
-                if dep_id not in completed_tasks:
-                    dependency_failed = True
-                    break
+        # Task worker thread runner
+        def run_task_in_thread(task):
+            logger.info("Starting concurrent thread execution for task", task_id=task.id, title=task.title)
+            
+            # 1. Thread-safe read of shared inputs
+            with state_lock:
+                task.status = "running"
+                state["current_task"] = task.id
+                current_context = dict(context)
+                current_task_results = dict(task_results)
 
-            if dependency_failed:
-                logger.warning("Skipping task due to dependency failure", task_id=task.id, depends_on=task.depends_on)
-                task.status = "failed"
-                import json
-                task.result = json.dumps({"error": f"Dependency check failed. Preceding task(s) failed or not completed."})
-                failed_tasks.append(task.id)
-                task_results[task.id] = task.result
-                continue
-
-            # Skip if already run
-            if task.status in ("completed", "failed"):
-                continue
-
-            # Start executing task
-            logger.info("Executing task", task_id=task.id, title=task.title)
-            task.status = "running"
-            state["current_task"] = task.id
-
-            # Construct task-specific prompt
+            # 2. Construct task-specific prompt
             task_prompt = (
                 f"You are executing the following specific task in the execution plan:\n"
                 f"Task ID: {task.id}\n"
@@ -288,24 +278,20 @@ class NativeOrchestratorAgent(BaseAgent):
                 f"Do not try to solve other tasks."
             )
             
-            # Inject preceding task results
-            if task_results:
+            if current_task_results:
                 task_prompt += "\n\nResults of previously executed tasks:\n"
-                for prev_id, prev_res in task_results.items():
+                for prev_id, prev_res in current_task_results.items():
                     task_prompt += f"- Task {prev_id} Result: {prev_res}\n"
 
             # Re-build system instruction dynamically with updated context
-            context_str = "\n".join(f"  - {k}: {v}" for k, v in context.items()) if context else "No active context variables."
+            context_str = "\n".join(f"  - {k}: {v}" for k, v in current_context.items()) if current_context else "No active context variables."
             system_instruction = ORCHESTRATOR_SYSTEM_INSTRUCTION.format(context_variables=context_str)
 
             # Build Gemini tool declarations
             function_declarations = self._build_function_declarations(available_tools)
             gemini_tools = [types.Tool(function_declarations=function_declarations)] if function_declarations else []
 
-            # Prepare conversation contents for this specific task.
-            # We pass only the task-prompt as the user request rather than the entire
-            # mixed conversation history. This ensures the ReAct loop is focused on the current task's
-            # objectives and naturally invokes the correct tools, without hardcoding any filtering.
+            # Prepare conversation contents for this specific task
             contents = [
                 types.Content(role="user", parts=[types.Part(text=task_prompt)])
             ]
@@ -313,6 +299,11 @@ class NativeOrchestratorAgent(BaseAgent):
             max_turns = 5
             task_tool_outputs = {}
             task_execution_failed = False
+            local_llm_calls = []
+            local_tool_executions = []
+            local_trace_entries = []
+            local_selected_tools = []
+            local_context_updates = {}
 
             try:
                 for turn in range(max_turns):
@@ -353,16 +344,15 @@ class NativeOrchestratorAgent(BaseAgent):
                                 raise e
                     else:
                         raise LLMError("Gemini API calls failed: Exceeded maximum retries due to rate limit (429).")
+                    
                     _llm_dur = _t.perf_counter() - _llm_t0
-                    llm_calls = list(diagnostics.get("llm_calls", []))
-                    llm_calls.append({
+                    local_llm_calls.append({
                         "type": "llm",
                         "caller": "Orchestrator ReAct",
                         "model": self.client.default_model,
                         "duration_s": round(_llm_dur, 3),
                         "purpose": f"Task {task.id} turn {turn + 1}",
                     })
-                    diagnostics["llm_calls"] = llm_calls
 
                     candidate = response.candidates[0]
                     response_content = candidate.content
@@ -381,49 +371,47 @@ class NativeOrchestratorAgent(BaseAgent):
                     function_response_parts = []
                     logger.info("Executing tools in parallel mode", task_id=task.id)
 
-                    # Parallel execution
-                    from concurrent.futures import ThreadPoolExecutor
+                    # Parallel execution of multiple tools requested in a single task turn
                     with ThreadPoolExecutor() as executor:
                         futures = [
                             executor.submit(self._execute_single_tool, fc.function_call, state, task.id)
                             for fc in function_call_parts
                         ]
-                        # Wait for all executions to complete
                         parallel_results = [f.result() for f in futures]
                     
-                    # Sequentially process results to merge updates and record traces thread-safely
+                    # Process tool results sequentially in the task thread
                     for res in parallel_results:
                         tool_name = res["tool_name"]
                         fc_id = res["fc_id"]
-                        fc_args = res["fc_args"]
                         tool_res = res["result"]
                         status = res["status"]
                         dur = res["duration_s"]
                         tool_ctx = res["tool_context"]
                         
-                        selected_tools.append(tool_name)
+                        local_selected_tools.append(tool_name)
                         task_tool_outputs[tool_name] = tool_res
-                        tool_outputs[tool_name] = tool_res
                         
-                        # Merge context updates back sequentially
+                        # Accumulate context updates locally
                         for key, val in tool_ctx.items():
                             if key == "adjustments":
-                                # Thread-safe merge of adjustments
-                                adj_map = {a["vehicle"].lower(): a for a in context.get("adjustments", [])}
+                                local_adjustments = local_context_updates.get("adjustments")
+                                if local_adjustments is None:
+                                    local_adjustments = list(current_context.get("adjustments", []))
+                                adj_map = {a["vehicle"].lower(): a for a in local_adjustments}
                                 for a in val:
                                     adj_map[a["vehicle"].lower()] = a
-                                context["adjustments"] = list(adj_map.values())
+                                local_context_updates["adjustments"] = list(adj_map.values())
                             else:
-                                context[key] = val
+                                local_context_updates[key] = val
                         
-                        state["context"] = context
+                        local_tool_executions.append({
+                            "tool": tool_name,
+                            "duration_s": dur,
+                            "status": status,
+                            "task_id": task.id,
+                            "parallel": True
+                        })
                         
-                        # Record tool timing in diagnostics
-                        tool_execs = list(diagnostics.get("tool_executions", []))
-                        tool_execs.append({"tool": tool_name, "duration_s": dur, "status": status, "task_id": task.id, "parallel": True})
-                        diagnostics["tool_executions"] = tool_execs
-                        
-                        # Log to trace
                         trace_entry = {
                             "node": "orchestrator",
                             "action": f"Task {task.id} Executed tool: {tool_name}",
@@ -437,7 +425,7 @@ class NativeOrchestratorAgent(BaseAgent):
                         }
                         if reasoning:
                             trace_entry["metadata"]["reasoning"] = reasoning
-                        execution_trace.append(trace_entry)
+                        local_trace_entries.append(trace_entry)
 
                         function_response_parts.append(
                             types.Part(
@@ -457,19 +445,118 @@ class NativeOrchestratorAgent(BaseAgent):
             except Exception as e:
                 logger.error("Task execution raised unhandled exception", task_id=task.id, error=str(e))
                 task_execution_failed = True
-                task.status = "failed"
-                import json
-                task.result = json.dumps({"error": str(e)})
-                failed_tasks.append(task.id)
-                task_results[task.id] = task.result
+                with state_lock:
+                    task.status = "failed"
+                    import json
+                    task.result = json.dumps({"error": str(e)})
+                    failed_tasks.append(task.id)
+                    task_results[task.id] = task.result
 
             if not task_execution_failed:
                 logger.info("Task completed successfully", task_id=task.id)
-                task.status = "completed"
-                import json
-                task.result = json.dumps(task_tool_outputs)
-                completed_tasks.append(task.id)
-                task_results[task.id] = task.result
+                with state_lock:
+                    task.status = "completed"
+                    import json
+                    task.result = json.dumps(task_tool_outputs)
+                    completed_tasks.append(task.id)
+                    task_results[task.id] = task.result
+
+            # 3. Thread-safe merge of local updates back into shared state
+            with state_lock:
+                # Merge diagnostics
+                diag_llm = list(diagnostics.get("llm_calls", []))
+                diag_llm.extend(local_llm_calls)
+                diagnostics["llm_calls"] = diag_llm
+
+                diag_tool = list(diagnostics.get("tool_executions", []))
+                diag_tool.extend(local_tool_executions)
+                diagnostics["tool_executions"] = diag_tool
+
+                # Merge trace entries
+                execution_trace.extend(local_trace_entries)
+
+                # Merge selected tools
+                selected_tools.extend(local_selected_tools)
+
+                # Merge tool outputs
+                for t_name, t_out in task_tool_outputs.items():
+                    tool_outputs[t_name] = t_out
+
+                # Merge context updates
+                for key, val in local_context_updates.items():
+                    if key == "adjustments":
+                        adj_map = {a["vehicle"].lower(): a for a in context.get("adjustments", [])}
+                        for a in val:
+                            adj_map[a["vehicle"].lower()] = a
+                        context["adjustments"] = list(adj_map.values())
+                    else:
+                        context[key] = val
+                state["context"] = context
+
+        # Topological execution batching loop
+        pending_tasks = [t for t in plan.tasks if t.status not in ("completed", "failed")]
+        
+        while pending_tasks:
+            # 1. Identify tasks whose dependencies are met
+            ready_tasks = []
+            for task in pending_tasks:
+                dep_ok = True
+                for dep_id in task.depends_on:
+                    if dep_id in failed_tasks:
+                        dep_ok = False
+                        break
+                    if dep_id not in completed_tasks:
+                        dep_ok = False
+                        break
+                
+                # If a dependency failed, mark it as failed immediately
+                dep_failed = False
+                for dep_id in task.depends_on:
+                    if dep_id in failed_tasks:
+                        dep_failed = True
+                        break
+                
+                if dep_failed:
+                    logger.warning("Failing task due to prerequisite task failure", task_id=task.id, depends_on=task.depends_on)
+                    task.status = "failed"
+                    import json
+                    task.result = json.dumps({"error": "Dependency check failed. Preceding task(s) failed."})
+                    failed_tasks.append(task.id)
+                    task_results[task.id] = task.result
+                    continue
+
+                if dep_ok and task.status == "pending":
+                    ready_tasks.append(task)
+            
+            # Filter pending_tasks to remove those that were failed due to dependency checks
+            pending_tasks = [t for t in plan.tasks if t.status not in ("completed", "failed")]
+
+            if not ready_tasks:
+                # No more ready tasks can be scheduled. If we still have pending tasks, it means
+                # they are permanently blocked by dependency failures, or there's a circular dependency.
+                if pending_tasks:
+                    logger.warning("Remaining pending tasks are blocked by dependency failures or cycles", pending=[t.id for t in pending_tasks])
+                    for task in pending_tasks:
+                        task.status = "failed"
+                        import json
+                        task.result = json.dumps({"error": "Task blocked by dependency failure."})
+                        failed_tasks.append(task.id)
+                        task_results[task.id] = task.result
+                break
+
+            # 2. Execute all ready tasks in parallel
+            logger.info("Scheduling ready tasks in parallel batch", batch=[t.id for t in ready_tasks])
+            with ThreadPoolExecutor() as batch_executor:
+                futures = [
+                    batch_executor.submit(run_task_in_thread, task)
+                    for task in ready_tasks
+                ]
+                for f in futures:
+                    f.result()
+
+            # Refresh pending tasks list for next iteration
+            pending_tasks = [t for t in plan.tasks if t.status not in ("completed", "failed")]
+
 
         # Serialize ExecutionPlan back
         updated_plan_dict = plan.model_dump()

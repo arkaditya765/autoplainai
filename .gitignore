@@ -79,3 +79,7 @@ venv.bak/
 project_report_rendered.html
 mermaid_viewer.html
 generate_viewer.py
+*vector_cache.json
+~$*
+*.xlsx
+*.pptx
